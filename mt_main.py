@@ -27,27 +27,42 @@ class PreProcessing:
 			if len(sequence)>=maxlen:
 				sequence=sequence[:maxlen]
 			else:
-				sequence = sequence + [0]*(maxlen - len(sequence))
+				if padding=='post':
+					sequence = sequence + [0]*(maxlen - len(sequence))
+				else:
+					sequence = [0]*(maxlen - len(sequence)) + sequence
 			ret.append(sequence)
 		return np.array(ret)
+
+	def loadPortmanteauData(self, src):
+		data = open(src,"r").readlines()
+		inputs, outputs = [],[]
+		data = [row.strip().split(',') for row in data]
+		inputs = [row[0]+" "+row[1] for row in data] # each input if firstWord SPACE secondWord
+		outputs = [row[2] for row in data]
 		
-	def loadDataCharacter(self, data=None):
-		if data==None:
-			print "loading data..."
-			data_src = config.data_src
-			texts = open(data_src,"r").readlines()
-		else:
-			texts = data
 		char_to_idx = {}
-		char_to_idx_ctr = 1
+		char_to_idx_ctr = 0 
 		idx_to_char = {}
 
+		char_to_idx[self.pad_word] = char_to_idx_ctr # 0 is for padword
+		idx_to_char[char_to_idx_ctr]=self.pad_word
+		char_to_idx_ctr+=1
 		char_to_idx[self.sent_start] = char_to_idx_ctr
 		idx_to_char[char_to_idx_ctr]=self.sent_start
 		char_to_idx_ctr+=1
 		char_to_idx[self.sent_end] = char_to_idx_ctr
 		idx_to_char[char_to_idx_ctr]=self.sent_end		
 		char_to_idx_ctr+=1
+
+		texts = inputs
+		for text in texts:
+			for ch in text:
+				if ch not in char_to_idx:
+					char_to_idx[ch] = char_to_idx_ctr
+					idx_to_char[char_to_idx_ctr]=ch
+					char_to_idx_ctr+=1
+		texts = outputs
 		for text in texts:
 			for ch in text:
 				if ch not in char_to_idx:
@@ -57,82 +72,61 @@ class PreProcessing:
 
 		print "Ignoring MAX_VOCAB_SIZE "
 		print "Found vocab size = ",char_to_idx_ctr-1
-		sequences = [ [char_to_idx[ch] for ch in text] for text in texts ]
-		sequences = [ [char_to_idx[self.sent_start]]+text+[char_to_idx[self.sent_end]] for text in sequences ]
+		sequences_input = [ [char_to_idx[ch] for ch in text] for text in inputs ]
+		sequences_input = [ [char_to_idx[self.sent_start]]+text+[char_to_idx[self.sent_end]] for text in sequences_input ]
+		sequences_output = [ [char_to_idx[ch] for ch in text] for text in outputs ]
+		sequences_output = [ [char_to_idx[self.sent_start]]+text+[char_to_idx[self.sent_end]] for text in sequences_output ]
 
-		sequences = pad_sequences(sequences, maxlen=config.MAX_SEQUENCE_LENGTH, padding='post', truncating='post')
-		print "Printing few sample sequences... "
-		print sequences[0]
-		print sequences[113]
-		print sequences[222]
+		sequences_input = pad_sequences(sequences_input, maxlen=config.max_input_seq_length, padding='pre', truncating='post')
+		sequences_output = pad_sequences(sequences_output, maxlen=config.max_output_seq_length, padding='post', truncating='post')
 		
-		self.sequences = sequences
-		char_to_idx[self.unknown_word]=0
 		self.word_index = char_to_idx
-		idx_to_char[0]=self.unknown_word
 		self.index_word = idx_to_char
-		self.vocab_size = len(char_to_idx) + 1 # for padded
+		self.vocab_size = len(char_to_idx)
 
-	def loadData(self):   
-		print "loading data..."
-		data_src = config.data_src
-		texts = open(data_src,"r").readlines()
-		texts = [ text.strip() for text in texts ]
-		texts = [self.sent_start + " " + text + " " + self.sent_end for text in texts]
-		#print texts[0]
+		print "Printing few sample sequences... "
+		print sequences_input[0],":", self.fromIdxSeqToVocabSeq(sequences_input[0]), "---", sequences_output[0], ":", self.fromIdxSeqToVocabSeq(sequences_output[0])
+		print sequences_input[113], sequences_output[113]
+
+		return sequences_input, sequences_output
+
+	def fromIdxSeqToVocabSeq(self, seq):
+		return [self.index_word[x] for x in seq]
+
+	def prepareMTData(self, inputs, outputs, seed=123):
+
+		decoder_inputs = np.array( [ sequence[:-1] for sequence in outputs ] )
+		decoder_outputs = np.array( [ np.expand_dims(sequence[1:],-1) for sequence in outputs ] )
+		encoder_inputs = np.array(inputs)
+
+		indices = np.arange(encoder_inputs.shape[0])
 		
-		tokenizer = Tokenizer(nb_words=config.MAX_VOCAB_SIZE)
-		tokenizer.fit_on_texts(texts)
-		sequences = tokenizer.texts_to_sequences(texts)
-
-
-		word_index = tokenizer.word_index
-		i_to_w = { i:w for w,i in word_index.items() }
-		print('Found %s unique tokens.' % len(word_index))
-		print [i_to_w[i] for i in sequences[0]]
-		print ""
-
-		sequences = pad_sequences(sequences, maxlen=config.MAX_SEQUENCE_LENGTH, padding='post', truncating='post')
-		#sequences = [ np_utils.to_categorical(sequence) for sequence in sequences]
-		print sequences[0]
-		print texts[0]
-
-		print "*************** ", word_index[self.sent_start]
-
-		a=sequences
-		self.sequences = sequences
-		print self.sequences[0]
-		word_index[self.unknown_word]=len(word_index)
-		word_index[self.pad_word]=0
-		self.word_index = word_index
-		index_word = {i:w for w,i in word_index.items()}
-		self.index_word = index_word
-		#print word_index
-
-	def prepareLMdata(self,seed=123):
-
-		data = np.array( [ sequence[:-1] for sequence in self.sequences ] )
-		labels = np.array( [ np.expand_dims(sequence[1:],-1) for sequence in self.sequences ] )
-		indices = np.arange(data.shape[0])
+		#shuffling
 		np.random.seed(seed)
 		np.random.shuffle(indices)
-		data = data[indices]
-		labels = labels[indices]
-		nb_validation_samples = int(config.VALIDATION_SPLIT * data.shape[0])
-		nb_test_samples = int(config.TEST_SPLIT * data.shape[0])
+		
+		#spplit indices
+		nb_validation_samples = int(config.VALIDATION_SPLIT * encoder_inputs.shape[0])
+		nb_test_samples = int(config.TEST_SPLIT * encoder_inputs.shape[0])
+		test_indices = indices[-nb_test_samples:]
+		val_indices = indices[-nb_test_samples-nb_validation_samples:nb_test_samples]
+		train_indices = indices[0:-nb_test_samples-nb_validation_samples]
 		print "nb_test_samples=",nb_test_samples
 
-		self.x_train = data[0:-nb_test_samples-nb_validation_samples]
-		self.y_train = labels[0:-nb_test_samples-nb_validation_samples]
-		self.x_val = data[-nb_test_samples-nb_validation_samples:-nb_test_samples]
-		self.y_val = labels[-nb_test_samples-nb_validation_samples:-nb_test_samples]
-		self.x_test = data[-nb_test_samples:]
-		self.y_test = labels[-nb_test_samples:]
-		print "================="
-		print self.x_train.shape, " ", self.y_train.shape
-		print self.x_val.shape
-		print self.x_test.shape
-		print "================="
+		#splits
+		data = [encoder_inputs, decoder_inputs, decoder_outputs]
+		train = [ dat[train_indices] for dat in data ]
+		val = [ dat[val_indices] for dat in data ]
+		test = [ dat[test_indices] for dat in data ]
+
+		print "========================="
+		print "traindata  lengths"
+		for dat in train:
+			print len(dat)
+		print "========================="
+
+		return train,val,test
+		
 
 	
 def saveEmbeddings(model, vocab, embeddings_out_name = "output_embeddings.txt"):
@@ -158,39 +152,47 @@ def main():
 	preprocessing = PreProcessing()
 	rnn_model = solver.Solver()
 
-	if config.char_or_word == config.character_model:
-		data=None
-		if config.data_type=="cmu_dict":
-			cmu_data = datasets.getCMUDictData(config.data_src_cmu)
-			data=cmu_data
-		preprocessing.loadDataCharacter(data=data)
-	else:
-		preprocessing.loadData()		
-	preprocessing.prepareLMdata()
+	inputs,outputs = preprocessing.loadPortmanteauData("./data/finalports.csv")		
+	train,val,test = preprocessing.prepareMTData(inputs,outputs)
+	#return
 	
 	# get model
 	params = {}
 	params['embeddings_dim'] =  config.embeddings_dim
 	params['lstm_cell_size'] = config.lstm_cell_size
-	if config.char_or_word == config.character_model:
-		params['vocab_size'] =  preprocessing.vocab_size
-	else:
-		params['vocab_size'] =  len( preprocessing.word_index )
-	params['max_sentence_length'] = config.inp_length-1
+	params['vocab_size'] =  preprocessing.vocab_size
+	params['max_input_seq_length'] = config.max_input_seq_length
+	params['max_output_seq_length'] = config.max_output_seq_length-1 #inputs are all but last element, outputs are al but first element
 	params['batch_size'] = 20
+	params['pretrained_embeddings']=True
 	
-	x_train, y_train, x_val, y_val, x_test, y_test = preprocessing.x_train, preprocessing.y_train, preprocessing.x_val, preprocessing.y_val, preprocessing.x_test, preprocessing.y_test
+	#return
 	
 	# train
-	x_train = x_train[:200]
-	y_train = y_train[:200]
+	lim=200
+	if lim!=-1:
+		train_encoder_inputs, train_decoder_inputs, train_decoder_outputs = train
+		train_encoder_inputs = train_encoder_inputs[:lim]
+		train_decoder_inputs = train_decoder_inputs[:lim]
+		train_decoder_outputs = train_decoder_outputs[:lim]
+		train = train_encoder_inputs, train_decoder_inputs, train_decoder_outputs
+	if params['pretrained_embeddings']:
+		encoder_embedding_matrix = np.random.rand( params['vocab_size'], params['embeddings_dim'] )
 
+	_ = rnn_model.getModel(params, mode='train',reuse=False)
+	rnn_model.trainModel(config=params, train_feed_dict=train, val_feed_dct=None, reverse_vocab=preprocessing.index_word, do_init=True)
 
-	#_ = rnn_model.getModel(params, mode='train')
-	#rnn_model.trainModel(x_train, y_train, params, None, None, preprocessing.index_word)
+	print "--------------------TRAINING AGAIN -------------------------"
+	_ = rnn_model.getModel(params, mode='train', reuse=True)
+	rnn_model.trainModel(config=params, train_feed_dict=train, val_feed_dct=None, reverse_vocab=preprocessing.index_word, do_init=False)
 	
-	_ = rnn_model.getModel(params, mode='inference')
-	rnn_model.runInference(params, x_train[:params['batch_size']], preprocessing.index_word)
+
+	if len(train_decoder_outputs.shape)==3:
+		train_decoder_outputs=np.reshape(train_decoder_outputs, (train_decoder_outputs.shape[0], train_decoder_outputs.shape[1]))
+
+	## _ = rnn_model.getModel(params, mode='inference')
+	## print "----Running inference-----"
+	## rnn_model.runInference(params, train_encoder_inputs[:params['batch_size']], train_decoder_outputs[:params['batch_size']], preprocessing.index_word)
 
 if __name__ == "__main__":
 	main()

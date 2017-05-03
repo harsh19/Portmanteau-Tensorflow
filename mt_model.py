@@ -30,7 +30,7 @@ class RNNModel:
 		cell = lstm_cell
 		initial_state = self._getEncoderInitialState(cell, batch_size)
 
-		#unrolled lstm 
+		#unrolled lstm 	
 		outputs = [] # h values at each time step
 		state = initial_state
 		with tf.variable_scope("RNN"):
@@ -45,9 +45,9 @@ class RNNModel:
 	def getEncoderModel(self, config, mode='training', reuse=False ):
 
 		token_vocab_size = config['vocab_size']
-		max_sentence_length = config['max_sentence_length']
+		max_sentence_length = config['max_input_seq_length'] # max sequene length of encoder
 		embeddings_dim = config['embeddings_dim']
-		lstm_cell_size = config['lstm_cell_size']		
+		lstm_cell_size = config['lstm_cell_size']
 
 		#placeholders
 		if mode=='training':
@@ -55,18 +55,20 @@ class RNNModel:
 			#Masker not needed for encoder #self.masker = masker = tf.placeholder("float32", [None, max_sentence_length], name="masker") # token_lookup_sequences
 		elif mode=='inference':
 			self.token_lookup_sequences_placeholder_inference = token_lookup_sequences_placeholder = tf.placeholder("int32", [None, max_sentence_length], name="token_lookup_sequences") # token_lookup_sequences
-		elif mode=='inference_only':
-			self.token_lookup_sequences_placeholder_inference = token_lookup_sequences_placeholder = tf.placeholder("int32", [None, max_sentence_length], name="token_lookup_sequences") # token_lookup_sequences
 		else:
 			print "@@@@@@@@@@@@@@@@@2 ERROR. Mode not supported"
 
 		
 		#get embeddings
-		token_emb_mat = self.getEmbeddings(tf.get_variable_scope(), token_vocab_size, embeddings_dim, reuse=reuse)
+		if reuse:
+			token_emb_mat = self.encoder_token_emb_mat
+		else:
+			print "reuse = ",reuse
+			self.encoder_token_emb_mat = token_emb_mat = self.initEmbeddings(tf.get_variable_scope(), token_vocab_size, embeddings_dim, reuse=reuse)
 		inp = tf.nn.embedding_lookup(token_emb_mat, token_lookup_sequences_placeholder) 
 			
 		# run lstm 
-		outputs_tensor = self.encoderRNN(inp, lstm_cell_size, config['batch_size'], config['max_sentence_length'] , reuse, mode=mode)
+		outputs_tensor = self.encoderRNN(inp, lstm_cell_size, config['batch_size'], max_sentence_length , reuse, mode=mode)
 		outputs = tf.unstack(outputs_tensor)
 		return outputs
 
@@ -75,9 +77,9 @@ class RNNModel:
 	# DECODER MODEL...
 
 	def attentionLayer(self, encoder_vals, h_prev, reuse=False):
-		print "reuse = ",reuse
+		#print "reuse = ",reuse
 		with tf.variable_scope(tf.get_variable_scope(), reuse=reuse):
-			print tf.get_variable_scope().reuse
+			#print tf.get_variable_scope().reuse
 			#print encoder_vals
 			shap = encoder_vals.get_shape().as_list()
 			#print "encoder_Vals.shape: ",shap
@@ -131,17 +133,20 @@ class RNNModel:
 		pred += (tf.matmul(context, w_context_out) + b_context_out)  #(N,vocab_size)
 		return pred
 
-	def getEmbeddings(self, emb_scope, token_vocab_size, embeddings_dim, reuse=False):
+	def initEmbeddings(self, emb_scope, token_vocab_size, embeddings_dim, reuse=False, pretrained_embeddings=False):
 		with tf.variable_scope(emb_scope):
-			if reuse:
-				tf.get_variable_scope().reuse_variables()
-				token_emb_mat = tf.get_variable("emb_mat", shape=[token_vocab_size, embeddings_dim], dtype='float')
+			if pretrained_embeddings:
+				#W = tf.get_variable(inititf.constant(0.0, shape=[token_vocab_size, embeddings_dim]),  trainable=True, name="W_embeddings") # vocab_size includes padding, start, end, etc.
+				W = tf.get_variable(shape=[token_vocab_size, embeddings_dim],  trainable=True, name="W_embeddings") 
+				self.embedding_placeholder = embedding_placeholder = tf.placeholder(tf.float32, [token_vocab_size, embeddings_dim])
+				token_emb_mat = tf.assign(W, embedding_placeholder, name="emb_mat")
+				print "*token_emb_mat= ", token_emb_mat
 			else:
 				token_emb_mat = tf.get_variable("emb_mat", shape=[token_vocab_size, embeddings_dim], dtype='float')
 				# 0-mask
 				token_emb_mat = tf.concat( [tf.zeros([1, embeddings_dim]), tf.slice(token_emb_mat, [1,0],[-1,-1]) ], axis=0 )	
+				print "token_emb_mat = ",token_emb_mat
 		return token_emb_mat
-
 
 	def greedyInferenceModel(self, params ):
 		lstm_cell = params['lstm_cell']
@@ -150,7 +155,7 @@ class RNNModel:
 		lstm_cell_size = params['lstm_cell_size']
 		batch_size = params['batch_size']
 		embeddings_dim = params['embeddings_dim']
-		batch_time_steps = params['max_sentence_length']
+		batch_time_steps = params['max_output_seq_length']
 		token_emb_mat = params['token_emb_mat']
 		w_out, b_out, w_context_out, b_context_out = params['output_vars']
 		encoder_outputs = params['encoder_outputs']
@@ -183,7 +188,7 @@ class RNNModel:
 		lstm_cell_size = params['lstm_cell_size']
 		batch_size = params['batch_size']
 		embeddings_dim = params['embeddings_dim']
-		batch_time_steps = params['max_sentence_length']
+		batch_time_steps = params['max_output_seq_length']
 		if 'token_emb_mat' in params:
 			token_emb_mat = params['token_emb_mat']
 		else:
@@ -233,7 +238,7 @@ class RNNModel:
 				print pred[0].shape
 				tf.get_variable_scope().reuse_variables()
 
-			elif mode=='inference' or mode=='inference_only': #inference
+			elif mode=='inference':
 
 				#Greedy
 				params['output_vars'] = w_out, b_out, w_context_out, b_context_out
@@ -259,7 +264,7 @@ class RNNModel:
 		print " IN DECODER MODEL :: ",encoder_outputs[0].shape
 
 		token_vocab_size = config['vocab_size']
-		max_sentence_length = config['max_sentence_length']
+		max_sentence_length = config['max_output_seq_length']
 		embeddings_dim = config['embeddings_dim']
 		lstm_cell_size = config['lstm_cell_size']
 
@@ -274,7 +279,10 @@ class RNNModel:
 		emb_scope = 'emb_decoder'
 		if share_embeddings:
 			emb_scope='emb'
-		token_emb_mat = self.getEmbeddings(emb_scope, token_vocab_size, embeddings_dim, reuse=reuse)
+		if reuse:
+			token_emb_mat = self.decoder_token_emb_mat
+		else:
+			self.decoder_token_emb_mat = token_emb_mat = self.initEmbeddings(emb_scope, token_vocab_size, embeddings_dim, reuse=reuse)
 
 		with tf.variable_scope('decoder',reuse=reuse):
 				
@@ -333,7 +341,10 @@ class RNNModel:
 		emb_scope = 'emb_decoder'
 		if share_embeddings:
 			emb_scope='emb'
-		token_emb_mat = self.getEmbeddings(emb_scope, token_vocab_size, embeddings_dim, reuse=reuse)
+		if reuse:
+			token_emb_mat = self.decoder_token_emb_mat
+		else:	
+			self.decoder_token_emb_mat = token_emb_mat = initEmbeddings(emb_scope, token_vocab_size, embeddings_dim, reuse=reuse)
 
 		with tf.variable_scope('decoder',reuse=reuse):
 				
