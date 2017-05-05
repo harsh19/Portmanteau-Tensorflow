@@ -33,6 +33,7 @@ class RNNModel:
 		#unrolled lstm 	
 		outputs = [] # h values at each time step
 		state = initial_state
+		print "num_steps = ",num_steps
 		with tf.variable_scope("RNN"):
 			for time_step in range(num_steps):
 				if time_step > 0: tf.get_variable_scope().reuse_variables()
@@ -42,7 +43,7 @@ class RNNModel:
 		outputs = tf.stack(outputs) 
 		return outputs
 
-	def getEncoderModel(self, config, mode='training', reuse=False ):
+	def getEncoderModel(self, config, bucket_num, mode='training', reuse=False):
 
 		token_vocab_size = config['vocab_size']
 		max_sentence_length = config['max_input_seq_length'] # max sequene length of encoder
@@ -51,19 +52,15 @@ class RNNModel:
 
 		#placeholders
 		if mode=='training':
-			self.token_lookup_sequences_placeholder = token_lookup_sequences_placeholder = tf.placeholder("int32", [None, max_sentence_length], name="token_lookup_sequences") # token_lookup_sequences
-			#Masker not needed for encoder #self.masker = masker = tf.placeholder("float32", [None, max_sentence_length], name="masker") # token_lookup_sequences
+			token_lookup_sequences_placeholder = self.token_lookup_sequences_placeholder_list[bucket_num]
 		elif mode=='inference':
 			self.token_lookup_sequences_placeholder_inference = token_lookup_sequences_placeholder = tf.placeholder("int32", [None, max_sentence_length], name="token_lookup_sequences") # token_lookup_sequences
-		else:
-			print "@@@@@@@@@@@@@@@@@2 ERROR. Mode not supported"
-
 		
 		#get embeddings
 		if reuse:
 			token_emb_mat = self.encoder_token_emb_mat
 		else:
-			print "reuse = ",reuse
+			print "token_lookup_sequences_placeholder = ",token_lookup_sequences_placeholder
 			self.encoder_token_emb_mat = token_emb_mat = self.initEmbeddings(tf.get_variable_scope(), token_vocab_size, embeddings_dim, reuse=reuse)
 		inp = tf.nn.embedding_lookup(token_emb_mat, token_lookup_sequences_placeholder) 
 			
@@ -255,7 +252,28 @@ class RNNModel:
 
 
 	#################################################################################################################
-	def getDecoderModel(self, config, encoder_outputs, is_training=False, mode='training', reuse=False ):
+
+	def __init__(self, buckets_dict):
+		print "========== INIT ============= "
+		self.token_lookup_sequences_decoder_placeholder_list = []
+		self.masker_list = []
+		self.token_output_sequences_decoder_placeholder_list = []
+		self.token_lookup_sequences_placeholder_list = []
+
+		for bucket_num, bucket in buckets_dict.items():
+			max_sentence_length = bucket['max_input_seq_length']
+			self.token_lookup_sequences_placeholder_list.append( tf.placeholder("int32", [None, max_sentence_length], name="token_lookup_sequences"+str(bucket_num))  )# token_lookup_sequences
+			
+			max_sentence_length = bucket['max_output_seq_length']
+			self.masker_list.append( tf.placeholder("float32", [None, max_sentence_length], name="masker"+str(bucket_num)) )
+			self.token_output_sequences_decoder_placeholder_list.append( tf.placeholder("int32", [None, max_sentence_length], name="token_output_sequences_decoder_placeholder"+str(bucket_num)) )
+			self.token_lookup_sequences_decoder_placeholder_list.append( tf.placeholder("int32", [None, max_sentence_length], name="token_lookup_sequences_decoder_placeholder"+str(bucket_num)) ) # token_lookup_sequences
+
+		print "========== INIT OVER ============= "
+
+
+
+	def getDecoderModel(self, config, encoder_outputs, is_training=False, mode='training', reuse=False, bucket_num=0 ):
 
 		print "==========================================================="
 		if mode=='inference' and is_training:
@@ -270,9 +288,9 @@ class RNNModel:
 
 		#placeholders
 		if mode=='training':
-			self.token_lookup_sequences_decoder_placeholder = token_lookup_sequences_decoder_placeholder = tf.placeholder("int32", [None, max_sentence_length], name="token_lookup_sequences_decoder_placeholder") # token_lookup_sequences
-			self.masker = masker = tf.placeholder("float32", [None, max_sentence_length], name="masker")
-			self.token_output_sequences_decoder_placeholder = token_output_sequences_placeholder = tf.placeholder("int32", [None, max_sentence_length], name="token_output_sequences_decoder_placeholder") 
+			token_lookup_sequences_decoder_placeholder =self.token_lookup_sequences_decoder_placeholder_list[bucket_num]
+			masker = self.masker_list[bucket_num]
+			token_output_sequences_placeholder = self.token_output_sequences_decoder_placeholder_list[bucket_num]
 
 		#embeddings
 		share_embeddings=False

@@ -150,7 +150,6 @@ def saveEmbeddings(model, vocab, embeddings_out_name = "output_embeddings.txt"):
 
 def main():
 	preprocessing = PreProcessing()
-	rnn_model = solver.Solver()
 
 	inputs,outputs = preprocessing.loadPortmanteauData("./data/finalports.csv")		
 	train,val,test = preprocessing.prepareMTData(inputs,outputs)
@@ -167,6 +166,9 @@ def main():
 	params['pretrained_embeddings']=True
 	
 	#return
+	print params
+	buckets = {  0:{'max_input_seq_length':40, 'max_output_seq_length':19},1:{'max_input_seq_length':40,'max_output_seq_length':19}, 2:{'max_input_seq_length':40, 'max_output_seq_length':19} }
+	print buckets
 	
 	# train
 	lim=200
@@ -179,12 +181,17 @@ def main():
 	if params['pretrained_embeddings']:
 		encoder_embedding_matrix = np.random.rand( params['vocab_size'], params['embeddings_dim'] )
 
-	_ = rnn_model.getModel(params, mode='train',reuse=False)
-	rnn_model.trainModel(config=params, train_feed_dict=train, val_feed_dct=None, reverse_vocab=preprocessing.index_word, do_init=True)
+	train_buckets = {}
+	for bucket,_ in enumerate(buckets):
+		train_buckets[bucket] = train
 
-	print "--------------------TRAINING AGAIN -------------------------"
-	_ = rnn_model.getModel(params, mode='train', reuse=True)
-	rnn_model.trainModel(config=params, train_feed_dict=train, val_feed_dct=None, reverse_vocab=preprocessing.index_word, do_init=False)
+	rnn_model = solver.Solver(buckets)
+	_ = rnn_model.getModel(params, mode='train',reuse=False, buckets=buckets)
+	rnn_model.trainModel(config=params, train_feed_dict=train_buckets, val_feed_dct=None, reverse_vocab=preprocessing.index_word, do_init=True)
+
+	#print "--------------------TRAINING AGAIN -------------------------"
+	#_ = rnn_model.getModel(params, mode='train', reuse=True)
+	#rnn_model.trainModel(config=params, train_feed_dict=train, val_feed_dct=None, reverse_vocab=preprocessing.index_word, do_init=False)
 	
 
 	if len(train_decoder_outputs.shape)==3:

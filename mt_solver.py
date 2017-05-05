@@ -16,21 +16,51 @@ import mt_model as model
 	
 class Solver:
 
-	def __init__(self):
-		self.model_obj = model.RNNModel()
+	def __init__(self, buckets):
+		self.model_obj = model.RNNModel(buckets)
 
 
-	def getModel(self, config, mode='train', reuse=False ):
+	def getModel(self, config, buckets, mode='train', reuse=False ):
+
+		self.buckets = buckets 
+		self.preds = []
+		self.decoder_outputs_inference_list = []
+		self.encoder_outputs_list = []
+		self.token_lookup_sequences_placeholder_list = []
+		self.token_lookup_sequences_decoder_placeholder_list = []
+		self.token_output_sequences_decoder_placeholder_list = []
+		self.cost_list = []
+		self.mask_list = []
 
 		if mode=='train':
+			#########################
 			print "** reuse = ",reuse
-			encoder_outputs = self.model_obj.getEncoderModel(config, mode='training', reuse= reuse )
-			self.pred = self.model_obj.getDecoderModel(config, encoder_outputs, is_training=True, mode='training', reuse=reuse)
-			#tf.get_variable_scope().reuse_variables()
-			encoder_outputs = self.model_obj.getEncoderModel(config, mode='inference', reuse=True )
-			print "encoder_outputs.shaoe :::: ",len(encoder_outputs),encoder_outputs[0].shape
-			self.decoder_outputs_inference, self.encoder_outputs = self.model_obj.getDecoderModel(config, encoder_outputs, is_training=False, 	mode='inference', reuse=True)	
-			print "elf.encoder_outputs.shaoe :::: ",len(encoder_outputs),self.encoder_outputs[0].shape
+			for bucket_num, bucket_dct in self.buckets.items():
+				config['max_input_seq_length'] = bucket_dct['max_input_seq_length']
+				config['max_output_seq_length'] = bucket_dct['max_output_seq_length']
+				print ""
+				print ""
+				print "-------------------------------------------------------------------------------------------------------------------------------------------"
+				encoder_outputs = self.model_obj.getEncoderModel(config, mode='training', reuse= reuse, bucket_num=bucket_num )
+				pred = self.model_obj.getDecoderModel(config, encoder_outputs, is_training=True, mode='training', reuse=reuse, bucket_num=bucket_num)
+				self.preds.append(pred)
+
+				#encoder_outputs = self.model_obj.getEncoderModel(config, mode='inference', reuse=True )
+				#print "encoder_outputs.shaoe :::: ",len(encoder_outputs),encoder_outputs[0].shape
+				#decoder_outputs_inference, encoder_outputs = self.model_obj.getDecoderModel(config, encoder_outputs, is_training=False, 	mode='inference', reuse=True)	
+				#self.decoder_outputs_inference_list.append(decoder_outputs_inference)
+				self.encoder_outputs_list.append(encoder_outputs)
+				self.cost_list.append( self.model_obj.cost )
+				reuse=True
+			#self.pred = self.preds[1]
+			#self.decoder_outputs_inference = self.decoder_outputs_inference_list[1]
+			#self.encoder_outputs = self.encoder_outputs_list[1]
+			#print "elf.encoder_outputs.shaoe :::: ",encoder_outputs.shape,self.encoder_outputs[0].shape
+
+			self.token_lookup_sequences_placeholder_list  = self.model_obj.token_lookup_sequences_placeholder_list
+			self.token_lookup_sequences_decoder_placeholder_list = self.model_obj.token_lookup_sequences_decoder_placeholder_list
+			self.token_output_sequences_decoder_placeholder_list = self.model_obj.token_output_sequences_decoder_placeholder_list
+			self.mask_list = self.model_obj.masker_list
 		else:
 			config['batch_size'] = 5
 			encoder_outputs = self.model_obj.getEncoderModel(config, mode='inference', reuse=reuse)
@@ -43,80 +73,92 @@ class Solver:
 		print("==================")
 
 
-	def trainModel(self, config, train_feed_dict, val_feed_dct, reverse_vocab, do_init=False):
+	def trainModel(self, config, train_feed_dict, val_feed_dct, reverse_vocab, do_init=True):
 		
-		encoder_inputs, decoder_inputs, decoder_outputs = train_feed_dict
-		print("============== \n Printing all trainainble variables")
-		for v in tf.trainable_variables():
-			print(v)
-		print("==================")
-
-		cost = self.model_obj.cost
-
-		# if y is passed as (N, seq_length, 1): change it to (N,seq_length)
-		if len(decoder_outputs.shape)==3:
-			decoder_outputs=np.reshape(decoder_outputs, (decoder_outputs.shape[0], decoder_outputs.shape[1]))
-
-		#create temporary feed dictionary
-		feed_dct={self.model_obj.token_lookup_sequences_placeholder:encoder_inputs, self.model_obj.token_output_sequences_decoder_placeholder:decoder_outputs, self.model_obj.token_lookup_sequences_decoder_placeholder:decoder_inputs}
-
-		# Gradient descent
-		learning_rate=0.1
-		batch_size=config['batch_size']
-		optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(cost)
-
 		# Initializing the variables
 		if do_init:
 			init = tf.global_variables_initializer()
 			sess = tf.Session()
 			sess.run(init)
 			self.sess= sess
-		sess = self.sess
+
+		for bucket_num,bucket in enumerate(self.buckets):
+			encoder_inputs, decoder_inputs, decoder_outputs = train_feed_dict[bucket_num]
+			print("============== \n Printing all trainainble variables")
+			for v in tf.trainable_variables():
+				print(v)
+			print("==================")
+
+			#cost = self.model_obj.cost
+
+			# if y is passed as (N, seq_length, 1): change it to (N,seq_length)
+			if len(decoder_outputs.shape)==3:
+				decoder_outputs=np.reshape(decoder_outputs, (decoder_outputs.shape[0], decoder_outputs.shape[1]))
+
+			#create temporary feed dictionary
+			token_lookup_sequences_placeholder = self.token_lookup_sequences_placeholder_list[bucket_num]
+			token_output_sequences_decoder_placeholder = self.token_output_sequences_decoder_placeholder_list[bucket_num]
+			token_lookup_sequences_decoder_placeholder = self.token_lookup_sequences_decoder_placeholder_list[bucket_num]
+			feed_dct={token_lookup_sequences_placeholder:encoder_inputs, token_output_sequences_decoder_placeholder:decoder_outputs, token_lookup_sequences_decoder_placeholder:decoder_inputs}
+			print "token_lookup_sequences_placeholder,  = ",token_lookup_sequences_placeholder, "\n token_output_sequences_decoder_placeholder = ",token_output_sequences_decoder_placeholder,"token_lookup_sequences_decoder_placeholder=",token_lookup_sequences_decoder_placeholder
+			print "\n encoder_inputs = ",encoder_inputs.shape, "\ndecoder_outputs =  ",decoder_outputs.shape, "\n decoder_inputs =  ", decoder_inputs.shape
+
+			pred = self.preds[bucket_num]
+			masker = self.mask_list[bucket_num]
+			cost = self.cost_list[bucket_num]
+
+			# Gradient descent
+			learning_rate=0.1
+			batch_size=config['batch_size']
+			optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(cost)
+
+			sess = self.sess
+			
 
 
-		training_iters=5
-		display_step=2
-		sample_step=2
-		n = feed_dct[self.model_obj.token_lookup_sequences_placeholder].shape[0]
-		# Launch the graph
-		step = 1
-		#preds = np.array( sess.run(self.pred, feed_dict= feed_dct) )
-		#print preds
-		#with tf.Session() as sess:
-		while step < training_iters:
-			#num_of_batches =  n/batch_size #(n+batch_size-1)/batch_size
-			num_of_batches =  (n+batch_size-1)/batch_size
-			for j in range(num_of_batches):
-				#print "j= ",j
-				feed_dict_cur = {}
-				for k,v in feed_dct.items():
-					feed_dict_cur[k] = v[j*batch_size:min(n,(j+1)*batch_size)]
-					#print feed_dict_cur[k].shape
-				cur_out = feed_dict_cur[self.model_obj.token_output_sequences_decoder_placeholder]
-				x,y = np.nonzero(cur_out)
-				mask = np.zeros(cur_out.shape, dtype=np.float)
-				mask[x,y]=1
-				feed_dict_cur[self.model_obj.masker]=mask
+			training_iters=5
+			display_step=2
+			sample_step=20
+			n = feed_dct[token_lookup_sequences_placeholder].shape[0]
+			# Launch the graph
+			step = 1
+			#preds = np.array( sess.run(self.pred, feed_dict= feed_dct) )
+			#print preds
+			#with tf.Session() as sess:
+			while step < training_iters:
+				#num_of_batches =  n/batch_size #(n+batch_size-1)/batch_size
+				num_of_batches =  (n+batch_size-1)/batch_size
+				for j in range(num_of_batches):
+					#print "j= ",j
+					feed_dict_cur = {}
+					for k,v in feed_dct.items():
+						feed_dict_cur[k] = v[j*batch_size:min(n,(j+1)*batch_size)]
+						#print feed_dict_cur[k].shape
+					cur_out = feed_dict_cur[token_output_sequences_decoder_placeholder]
+					x,y = np.nonzero(cur_out)
+					mask = np.zeros(cur_out.shape, dtype=np.float)
+					mask[x,y]=1
+					feed_dict_cur[masker]=mask
 
-				sess.run(optimizer, feed_dict=feed_dict_cur )
-				if step % display_step == 0:
-					if j<10:
-					#print " j = ",j
-						loss = sess.run(cost, feed_dict= feed_dict_cur)
-						print "step ",step," : ",loss
-				if step % sample_step == 0:
-					#continue
-					#print "@@@@@@@@@@@@@@@@@@@@@@@@@@ j= ",j
-					if j==0:
-	  					self.runInference( config, encoder_inputs[:batch_size], decoder_outputs[:batch_size], reverse_vocab, sess )
-						pred = np.array( sess.run(self.pred, feed_dict= feed_dict_cur) )
-						print pred.shape
-						print pred[0].shape
-						print np.sum(pred[0],axis=1)
-			step += 1
-			saver = tf.train.Saver()
-			save_path = saver.save(sess, "/tmp/model.ckpt")
-  			print "Model saved in file: ",save_path
+					sess.run(optimizer, feed_dict=feed_dict_cur )
+					if step % display_step == 0:
+						if j<10:
+						#print " j = ",j
+							loss = sess.run(cost, feed_dict= feed_dict_cur)
+							print "step ",step," : ",loss
+					if step % sample_step == 0:
+						#continue
+						#print "@@@@@@@@@@@@@@@@@@@@@@@@@@ j= ",j
+						if j==0:
+		  					self.runInference( config, encoder_inputs[:batch_size], decoder_outputs[:batch_size], reverse_vocab, sess )
+							pred = np.array( sess.run(pred, feed_dict= feed_dict_cur) )
+							print pred.shape
+							print pred[0].shape
+							print np.sum(pred[0],axis=1)
+				step += 1
+				saver = tf.train.Saver()
+				save_path = saver.save(sess, "/tmp/model.ckpt")
+	  			print "Model saved in file: ",save_path
 		self.saver = saver
 
 	###################################################################################
