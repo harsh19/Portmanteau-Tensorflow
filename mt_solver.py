@@ -74,6 +74,8 @@ class Solver:
 			sess.run(init)
 			self.sess= sess
 
+		saver = tf.train.Saver()
+
 		print("============== \n Printing all trainainble variables")
 		for v in tf.trainable_variables():
 			print(v)
@@ -108,9 +110,10 @@ class Solver:
 
 			sess = self.sess
 
-			training_iters=5
-			display_step=2
-			sample_step=2
+			training_iters=1000
+			display_step=50
+			sample_step=50
+			save_step = 50
 			n = feed_dct[token_lookup_sequences_placeholder].shape[0]
 			# Launch the graph
 			step = 1
@@ -148,10 +151,11 @@ class Solver:
 							print pred_cur[0].shape
 							print np.sum(pred_cur[0],axis=1)
 							'''
+				if step%save_step==0:
+					save_path = saver.save(sess, "./tmp/model"+str(step)+".ckpt")
+	  				print "Model saved in file: ",save_path
 				step += 1
-				saver = tf.train.Saver()
-				save_path = saver.save(sess, "/tmp/model.ckpt")
-	  			print "Model saved in file: ",save_path
+
 		self.saver = saver
 
 	###################################################################################
@@ -161,7 +165,7 @@ class Solver:
 		if sess==None:
 	  		sess = tf.Session()
 	  		saver = tf.train.Saver()
-	  		saver.restore(sess, "/tmp/model.ckpt")
+	  		saver.restore(sess, "./tmp/model.ckpt")
 		#return utilities.runInference(config, x_test, reverse_vocab, sess, solver_obj =self)
 		typ = "greedy" #config['inference_type']
 		model_obj = self.model_obj
