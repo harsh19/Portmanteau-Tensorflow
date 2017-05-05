@@ -16,9 +16,11 @@ import mt_model as model
 	
 class Solver:
 
-	def __init__(self, buckets):
-		self.model_obj = model.RNNModel(buckets)
-
+	def __init__(self, buckets=None, mode='training'):
+		if mode=='training':
+			self.model_obj = model.RNNModel(buckets, mode=mode)
+		else:
+			self.model_obj = model.RNNModel(buckets_dict=None, mode=mode)
 
 	def getModel(self, config, buckets, mode='train', reuse=False ):
 
@@ -34,28 +36,23 @@ class Solver:
 
 		if mode=='train':
 			#########################
-			print "** reuse = ",reuse
+			print "==================================================="
 			for bucket_num, bucket_dct in self.buckets.items():
 				config['max_input_seq_length'] = bucket_dct['max_input_seq_length']
 				config['max_output_seq_length'] = bucket_dct['max_output_seq_length']
 				print ""
 				print ""
-				print "-------------------------------------------------------------------------------------------------------------------------------------------"
+				print "------------------------------------------------------------------------------------------------------------------------------------------- "
 				encoder_outputs = self.model_obj.getEncoderModel(config, mode='training', reuse= reuse, bucket_num=bucket_num )
 				pred = self.model_obj.getDecoderModel(config, encoder_outputs, is_training=True, mode='training', reuse=reuse, bucket_num=bucket_num)
 				self.preds.append(pred)
 
-				#encoder_outputs = self.model_obj.getEncoderModel(config, mode='inference', reuse=True )
-				#print "encoder_outputs.shaoe :::: ",len(encoder_outputs),encoder_outputs[0].shape
-				#decoder_outputs_inference, encoder_outputs = self.model_obj.getDecoderModel(config, encoder_outputs, is_training=False, 	mode='inference', reuse=True)	
-				#self.decoder_outputs_inference_list.append(decoder_outputs_inference)
 				self.encoder_outputs_list.append(encoder_outputs)
 				self.cost_list.append( self.model_obj.cost )
 				reuse=True
-			#self.pred = self.preds[1]
-			#self.decoder_outputs_inference = self.decoder_outputs_inference_list[1]
-			#self.encoder_outputs = self.encoder_outputs_list[1]
-			#print "elf.encoder_outputs.shaoe :::: ",encoder_outputs.shape,self.encoder_outputs[0].shape
+			self.encoder_outputs = encoder_outputs = self.model_obj.getEncoderModel(config, mode='inference', reuse=True )
+			decoder_outputs_inference, encoder_outputs = self.model_obj.getDecoderModel(config, encoder_outputs, is_training=False, mode='inference', reuse=True)	
+			self.decoder_outputs_inference = decoder_outputs_inference
 
 			self.token_lookup_sequences_placeholder_list  = self.model_obj.token_lookup_sequences_placeholder_list
 			self.token_lookup_sequences_decoder_placeholder_list = self.model_obj.token_lookup_sequences_decoder_placeholder_list
@@ -64,14 +61,9 @@ class Solver:
 		else:
 			config['batch_size'] = 5
 			encoder_outputs = self.model_obj.getEncoderModel(config, mode='inference', reuse=reuse)
-			print "encoder_outputs.shaoe :::: ",len(encoder_outputs),encoder_outputs[0].shape
+			#print "encoder_outputs.shaoe :::: ",len(encoder_outputs),encoder_outputs[0].shape
 			self.decoder_outputs_inference, self.encoder_outputs = self.model_obj.getDecoderModel(config, encoder_outputs, is_training=False, 	mode='inference', reuse=False)	
-			print "elf.encoder_outputs.shaoe :::: ",len(encoder_outputs),self.encoder_outputs[0].shape
-		print("============== \n Printing all trainainble variables")
-		for v in tf.trainable_variables():
-			print(v)
-		print("==================")
-
+			#print "elf.encoder_outputs.shaoe :::: ",len(encoder_outputs),self.encoder_outputs[0].shape
 
 	def trainModel(self, config, train_feed_dict, val_feed_dct, reverse_vocab, do_init=True):
 		
@@ -82,13 +74,14 @@ class Solver:
 			sess.run(init)
 			self.sess= sess
 
+		print("============== \n Printing all trainainble variables")
+		for v in tf.trainable_variables():
+			print(v)
+		print("==================")
+
+
 		for bucket_num,bucket in enumerate(self.buckets):
 			encoder_inputs, decoder_inputs, decoder_outputs = train_feed_dict[bucket_num]
-			print("============== \n Printing all trainainble variables")
-			for v in tf.trainable_variables():
-				print(v)
-			print("==================")
-
 			#cost = self.model_obj.cost
 
 			# if y is passed as (N, seq_length, 1): change it to (N,seq_length)
@@ -100,8 +93,8 @@ class Solver:
 			token_output_sequences_decoder_placeholder = self.token_output_sequences_decoder_placeholder_list[bucket_num]
 			token_lookup_sequences_decoder_placeholder = self.token_lookup_sequences_decoder_placeholder_list[bucket_num]
 			feed_dct={token_lookup_sequences_placeholder:encoder_inputs, token_output_sequences_decoder_placeholder:decoder_outputs, token_lookup_sequences_decoder_placeholder:decoder_inputs}
-			print "token_lookup_sequences_placeholder,  = ",token_lookup_sequences_placeholder, "\n token_output_sequences_decoder_placeholder = ",token_output_sequences_decoder_placeholder,"token_lookup_sequences_decoder_placeholder=",token_lookup_sequences_decoder_placeholder
-			print "\n encoder_inputs = ",encoder_inputs.shape, "\ndecoder_outputs =  ",decoder_outputs.shape, "\n decoder_inputs =  ", decoder_inputs.shape
+			#print "token_lookup_sequences_placeholder,  = ",token_lookup_sequences_placeholder, "\n token_output_sequences_decoder_placeholder = ",token_output_sequences_decoder_placeholder,"token_lookup_sequences_decoder_placeholder=",token_lookup_sequences_decoder_placeholder
+			#print "\n encoder_inputs = ",encoder_inputs.shape, "\ndecoder_outputs =  ",decoder_outputs.shape, "\n decoder_inputs =  ", decoder_inputs.shape
 
 			pred = self.preds[bucket_num]
 			masker = self.mask_list[bucket_num]
@@ -113,12 +106,10 @@ class Solver:
 			optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(cost)
 
 			sess = self.sess
-			
-
 
 			training_iters=5
 			display_step=2
-			sample_step=20
+			sample_step=2
 			n = feed_dct[token_lookup_sequences_placeholder].shape[0]
 			# Launch the graph
 			step = 1
@@ -151,10 +142,11 @@ class Solver:
 						#print "@@@@@@@@@@@@@@@@@@@@@@@@@@ j= ",j
 						if j==0:
 		  					self.runInference( config, encoder_inputs[:batch_size], decoder_outputs[:batch_size], reverse_vocab, sess )
-							pred = np.array( sess.run(pred, feed_dict= feed_dict_cur) )
-							print pred.shape
-							print pred[0].shape
-							print np.sum(pred[0],axis=1)
+							'''pred_cur = np.array( sess.run(pred, feed_dict= feed_dict_cur) )
+							print pred_cur.shape
+							print pred_cur[0].shape
+							print np.sum(pred_cur[0],axis=1)
+							'''
 				step += 1
 				saver = tf.train.Saver()
 				save_path = saver.save(sess, "/tmp/model.ckpt")
@@ -177,11 +169,13 @@ class Solver:
 		batch_size = config['batch_size'] #x_test.shape[0]
 		if typ=="greedy":
 			decoder_outputs_inference, encoder_outputs = np.array( sess.run([self.decoder_outputs_inference, self.encoder_outputs], feed_dict= feed_dct) ) # timesteps, N
-			print("----->>>>>>>>")
+			encoder_outputs = np.array(encoder_outputs)
+			'''print("----->>>>>>>>")
 			print(encoder_outputs.shape)
 			print(encoder_outputs[0][1][:15]) # 1st data point, 2nd word
 			print(encoder_outputs[1][1][:15]) # 2nd data point, 2nd word
 			print("----->>>>>>>>")
+			'''
 			decoder_outputs_inference = np.transpose(decoder_outputs_inference) # (N,timesteps)
 			#print "decoder_outputs_inference.shape : ",decoder_outputs_inference.shape
 			for i,row in enumerate(decoder_outputs_inference):

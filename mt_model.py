@@ -43,7 +43,7 @@ class RNNModel:
 		outputs = tf.stack(outputs) 
 		return outputs
 
-	def getEncoderModel(self, config, bucket_num, mode='training', reuse=False):
+	def getEncoderModel(self, config, bucket_num=-1, mode='training', reuse=False):
 
 		token_vocab_size = config['vocab_size']
 		max_sentence_length = config['max_input_seq_length'] # max sequene length of encoder
@@ -137,12 +137,12 @@ class RNNModel:
 				W = tf.get_variable(shape=[token_vocab_size, embeddings_dim],  trainable=True, name="W_embeddings") 
 				self.embedding_placeholder = embedding_placeholder = tf.placeholder(tf.float32, [token_vocab_size, embeddings_dim])
 				token_emb_mat = tf.assign(W, embedding_placeholder, name="emb_mat")
-				print "*token_emb_mat= ", token_emb_mat
+				#print "*token_emb_mat= ", token_emb_mat
 			else:
 				token_emb_mat = tf.get_variable("emb_mat", shape=[token_vocab_size, embeddings_dim], dtype='float')
 				# 0-mask
 				token_emb_mat = tf.concat( [tf.zeros([1, embeddings_dim]), tf.slice(token_emb_mat, [1,0],[-1,-1]) ], axis=0 )	
-				print "token_emb_mat = ",token_emb_mat
+				#print "token_emb_mat = ",token_emb_mat
 		return token_emb_mat
 
 	def greedyInferenceModel(self, params ):
@@ -231,8 +231,8 @@ class RNNModel:
 				outputs_tensor = tf.stack(outputs) 
 				outputs = tf.unstack(outputs_tensor)
 				#pred = self.getDecoderOutput(outputs, lstm_cell_size, token_vocab_size, w_out, b_out, w_context_out, b_context_out, context)
-				print "--->>>>>> ",type(pred)
-				print pred[0].shape
+				#print "--->>>>>> ",type(pred)
+				#print pred[0].shape
 				tf.get_variable_scope().reuse_variables()
 
 			elif mode=='inference':
@@ -253,22 +253,22 @@ class RNNModel:
 
 	#################################################################################################################
 
-	def __init__(self, buckets_dict):
+	def __init__(self, buckets_dict, mode='training'):
 		print "========== INIT ============= "
-		self.token_lookup_sequences_decoder_placeholder_list = []
-		self.masker_list = []
-		self.token_output_sequences_decoder_placeholder_list = []
-		self.token_lookup_sequences_placeholder_list = []
+		if mode=='training':
+			self.token_lookup_sequences_decoder_placeholder_list = []
+			self.masker_list = []
+			self.token_output_sequences_decoder_placeholder_list = []
+			self.token_lookup_sequences_placeholder_list = []
 
-		for bucket_num, bucket in buckets_dict.items():
-			max_sentence_length = bucket['max_input_seq_length']
-			self.token_lookup_sequences_placeholder_list.append( tf.placeholder("int32", [None, max_sentence_length], name="token_lookup_sequences"+str(bucket_num))  )# token_lookup_sequences
-			
-			max_sentence_length = bucket['max_output_seq_length']
-			self.masker_list.append( tf.placeholder("float32", [None, max_sentence_length], name="masker"+str(bucket_num)) )
-			self.token_output_sequences_decoder_placeholder_list.append( tf.placeholder("int32", [None, max_sentence_length], name="token_output_sequences_decoder_placeholder"+str(bucket_num)) )
-			self.token_lookup_sequences_decoder_placeholder_list.append( tf.placeholder("int32", [None, max_sentence_length], name="token_lookup_sequences_decoder_placeholder"+str(bucket_num)) ) # token_lookup_sequences
-
+			for bucket_num, bucket in buckets_dict.items():
+				max_sentence_length = bucket['max_input_seq_length']
+				self.token_lookup_sequences_placeholder_list.append( tf.placeholder("int32", [None, max_sentence_length], name="token_lookup_sequences"+str(bucket_num))  )# token_lookup_sequences
+				
+				max_sentence_length = bucket['max_output_seq_length']
+				self.masker_list.append( tf.placeholder("float32", [None, max_sentence_length], name="masker"+str(bucket_num)) )
+				self.token_output_sequences_decoder_placeholder_list.append( tf.placeholder("int32", [None, max_sentence_length], name="token_output_sequences_decoder_placeholder"+str(bucket_num)) )
+				self.token_lookup_sequences_decoder_placeholder_list.append( tf.placeholder("int32", [None, max_sentence_length], name="token_lookup_sequences_decoder_placeholder"+str(bucket_num)) ) # token_lookup_sequences
 		print "========== INIT OVER ============= "
 
 
@@ -329,14 +329,14 @@ class RNNModel:
 					pred_masked = pred_for_loss 
 					#tf.multiply( tf.expand_dims(tf.transpose(masker),2), pred)  # after transpose and expand, masker becomes (4,20,1) : timesteps,N,1. so pred_masked is timesteps,N,vocab_size
 					
-					print "pred_masked .shape : ",pred_masked.shape
+					#print "pred_masked .shape : ",pred_masked.shape
 					pred_masked = tf.transpose( pred_masked , [1,0,2] ) # N, timesteps, vocabsize
 					cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=pred_masked, labels=token_output_sequences_placeholder) # token_output_sequences_placeholder is N,timesteps. cost will be N, timesteps
 					cost = tf.multiply(cost, masker)  # both masker and cost is N,timesteps. 
 
 					#masker = tf.reshape(masks, (-1))
 					#cost = losses * masks
-					print "cost.shape: " ,cost.shape
+					#print "cost.shape: " ,cost.shape
 					cost = tf.reduce_sum(cost) # N
 					masker_sum = tf.reduce_sum(masker) # N
 					cost = tf.divide(cost, masker_sum) # N

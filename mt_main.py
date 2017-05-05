@@ -185,21 +185,17 @@ def main():
 	for bucket,_ in enumerate(buckets):
 		train_buckets[bucket] = train
 
-	rnn_model = solver.Solver(buckets)
-	_ = rnn_model.getModel(params, mode='train',reuse=False, buckets=buckets)
-	rnn_model.trainModel(config=params, train_feed_dict=train_buckets, val_feed_dct=None, reverse_vocab=preprocessing.index_word, do_init=True)
-
-	#print "--------------------TRAINING AGAIN -------------------------"
-	#_ = rnn_model.getModel(params, mode='train', reuse=True)
-	#rnn_model.trainModel(config=params, train_feed_dict=train, val_feed_dct=None, reverse_vocab=preprocessing.index_word, do_init=False)
-	
+	#rnn_model = solver.Solver(buckets)
+	#_ = rnn_model.getModel(params, mode='train',reuse=False, buckets=buckets)
+	#rnn_model.trainModel(config=params, train_feed_dict=train_buckets, val_feed_dct=None, reverse_vocab=preprocessing.index_word, do_init=True)
 
 	if len(train_decoder_outputs.shape)==3:
 		train_decoder_outputs=np.reshape(train_decoder_outputs, (train_decoder_outputs.shape[0], train_decoder_outputs.shape[1]))
 
-	## _ = rnn_model.getModel(params, mode='inference')
-	## print "----Running inference-----"
-	## rnn_model.runInference(params, train_encoder_inputs[:params['batch_size']], train_decoder_outputs[:params['batch_size']], preprocessing.index_word)
+	rnn_model = solver.Solver(buckets=None, mode='inference')
+	_ = rnn_model.getModel(params, mode='inference', reuse=False, buckets=None)
+	print "----Running inference-----"
+	rnn_model.runInference(params, train_encoder_inputs[:params['batch_size']], train_decoder_outputs[:params['batch_size']], preprocessing.index_word)
 
 if __name__ == "__main__":
 	main()
