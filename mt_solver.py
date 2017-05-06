@@ -111,10 +111,10 @@ class Solver:
 
 			sess = self.sess
 
-			training_iters=500
-			display_step=20
-			sample_step=50
-			save_step = 100
+			training_iters=50
+			display_step=2
+			sample_step=5
+			save_step = 10
 			n = feed_dct[token_lookup_sequences_placeholder].shape[0]
 			# Launch the graph
 			step = 1

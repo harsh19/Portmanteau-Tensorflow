@@ -216,27 +216,28 @@ def main():
 		params['encoder_embeddings_matrix'] = encoder_embedding_matrix 
 		params['decoder_embeddings_matrix'] = decoder_embedding_matrix 
 
-	'''
-	train_buckets = {}
-	for bucket,_ in enumerate(buckets):
-		train_buckets[bucket] = train
+	mode='train'
+	if mode=='train':
+		train_buckets = {}
+		for bucket,_ in enumerate(buckets):
+			train_buckets[bucket] = train
 
-	rnn_model = solver.Solver(buckets)
-	_ = rnn_model.getModel(params, mode='train',reuse=False, buckets=buckets)
-	rnn_model.trainModel(config=params, train_feed_dict=train_buckets, val_feed_dct=None, reverse_vocab=preprocessing.index_word, do_init=True)
-	'''
+		rnn_model = solver.Solver(buckets)
+		_ = rnn_model.getModel(params, mode='train',reuse=False, buckets=buckets)
+		rnn_model.trainModel(config=params, train_feed_dict=train_buckets, val_feed_dct=None, reverse_vocab=preprocessing.index_word, do_init=True)
+	
+	else:
+		val_encoder_inputs, val_decoder_inputs, val_decoder_outputs = val
+		print "val_encoder_inputs = ",val_encoder_inputs
 
-	val_encoder_inputs, val_decoder_inputs, val_decoder_outputs = val
-	print "val_encoder_inputs = ",val_encoder_inputs
+		if len(val_decoder_outputs.shape)==3:
+			val_decoder_outputs=np.reshape(val_decoder_outputs, (val_decoder_outputs.shape[0], val_decoder_outputs.shape[1]))
 
-	if len(val_decoder_outputs.shape)==3:
-		val_decoder_outputs=np.reshape(val_decoder_outputs, (val_decoder_outputs.shape[0], val_decoder_outputs.shape[1]))
-
-	rnn_model = solver.Solver(buckets=None, mode='inference')
-	_ = rnn_model.getModel(params, mode='inference', reuse=False, buckets=None)
-	print "----Running inference-----"
-	#rnn_model.runInference(params, val_encoder_inputs[:params['batch_size']], val_decoder_outputs[:params['batch_size']], preprocessing.index_word)
-	rnn_model.solveAll(params, val_encoder_inputs, val_decoder_outputs, preprocessing.index_word)
+		rnn_model = solver.Solver(buckets=None, mode='inference')
+		_ = rnn_model.getModel(params, mode='inference', reuse=False, buckets=None)
+		print "----Running inference-----"
+		#rnn_model.runInference(params, val_encoder_inputs[:params['batch_size']], val_decoder_outputs[:params['batch_size']], preprocessing.index_word)
+		rnn_model.solveAll(params, val_encoder_inputs, val_decoder_outputs, preprocessing.index_word)
 
 if __name__ == "__main__":
 	main()

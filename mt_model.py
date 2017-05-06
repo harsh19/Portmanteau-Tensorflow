@@ -17,6 +17,26 @@ import utilities
 class RNNModel:
 
 
+	def __init__(self, buckets_dict, mode='training'):
+		print "========== INIT ============= "
+		self.use_reverse_encoder = True
+		if mode=='training':
+			self.token_lookup_sequences_decoder_placeholder_list = []
+			self.masker_list = []
+			self.token_output_sequences_decoder_placeholder_list = []
+			self.token_lookup_sequences_placeholder_list = []
+
+			for bucket_num, bucket in buckets_dict.items():
+				max_sentence_length = bucket['max_input_seq_length']
+				self.token_lookup_sequences_placeholder_list.append( tf.placeholder("int32", [None, max_sentence_length], name="token_lookup_sequences"+str(bucket_num))  )# token_lookup_sequences
+				
+				max_sentence_length = bucket['max_output_seq_length']
+				self.masker_list.append( tf.placeholder("float32", [None, max_sentence_length], name="masker"+str(bucket_num)) )
+				self.token_output_sequences_decoder_placeholder_list.append( tf.placeholder("int32", [None, max_sentence_length], name="token_output_sequences_decoder_placeholder"+str(bucket_num)) )
+				self.token_lookup_sequences_decoder_placeholder_list.append( tf.placeholder("int32", [None, max_sentence_length], name="token_lookup_sequences_decoder_placeholder"+str(bucket_num)) ) # token_lookup_sequences
+		print "========== INIT OVER ============= "
+
+
 	def _getEncoderInitialState(self,cell, batch_size):
 		return cell.zero_state(batch_size, tf.float32)
 
@@ -26,6 +46,7 @@ class RNNModel:
 		inputs = x
 
 		#define lstm cell
+		lstm_cell_size = 60
 		lstm_cell = rnn.BasicLSTMCell(lstm_cell_size, forget_bias=1.0, state_is_tuple=True, reuse=reuse)
 		cell = lstm_cell
 		initial_state = self._getEncoderInitialState(cell, batch_size)
@@ -41,6 +62,28 @@ class RNNModel:
 				#print(cell_output.shape)
 				outputs.append(cell_output)
 		outputs = tf.stack(outputs) 
+
+		if self.use_reverse_encoder:
+			with tf.variable_scope("rev_encoder"):
+				rev_lstm_cell = rnn.BasicLSTMCell(lstm_cell_size, forget_bias=1.0, state_is_tuple=True, reuse=reuse)
+				cell = rev_lstm_cell
+				initial_state = self._getEncoderInitialState(cell, batch_size)
+				rev_outputs = [] # h values at each time step
+				state = initial_state
+				print "num_steps = ",num_steps
+				for time_step in range(num_steps-1,-1,-1):
+					if time_step < (num_steps-1): tf.get_variable_scope().reuse_variables()
+					(cell_output, state) = cell(inputs[:, time_step, :], state)
+					#print(cell_output.shape)
+					#rev_outputs.append(cell_output)
+					rev_outputs = [cell_output] + rev_outputs # reverse encoder
+			rev_outputs = tf.stack(rev_outputs) 
+			#rev_outputs = tf.reverse(rev_outputs, axis=0)
+			print outputs.shape
+			#outputs = outputs + rev_outputs
+			outputs = tf.concat([outputs, rev_outputs], axis=2)
+			print outputs.shape
+
 		return outputs
 
 	def getEncoderModel(self, config, bucket_num=-1, mode='training', reuse=False):
@@ -78,39 +121,56 @@ class RNNModel:
 
 	def attentionLayer(self, encoder_vals, h_prev, reuse=False):
 		#print "reuse = ",reuse
+		lstm_cell_size = h_prev.get_shape().as_list()[-1]
 		with tf.variable_scope(tf.get_variable_scope(), reuse=reuse):
-			#print tf.get_variable_scope().reuse
-			#print encoder_vals
 			shap = encoder_vals.get_shape().as_list()
-			#print "encoder_Vals.shape: ",shap
 			encoder_vals_size = shap[2]
-			#batch_size = shap[0]
+			print "encoder_vals_size = ",encoder_vals_size
 			cell_size = h_prev.shape[1]
 			encoder_sequence_length = shap[1]
-			# h: (N,cell_size) Move it to (N, ,encoder_vals_size)   
-			# encoder_vals: (N, encoder_sequence_length, encoder_vals_size)
-			watt = tf.get_variable('watt', [cell_size, encoder_vals_size] )
+
+			winit = tf.get_variable('winit', [encoder_vals_size, lstm_cell_size] )
+			encoder_vals = tf.reshape(encoder_vals, [-1,encoder_vals_size])
+			encoder_vals = tf.matmul( encoder_vals, winit )
+			encoder_vals = tf.reshape(encoder_vals, [-1,shap[1],lstm_cell_size])
+
+			#if self.use_reverse_encoder:
+			watt = tf.get_variable('watt', [cell_size, cell_size] )
+			#else:
+			#	watt = tf.get_variable('watt', [cell_size, c] )
 			#watt = tf.get_variable('watt', initializer=tf.random_normal([100, 100]))
 			#b = tf.get_variable('b', [encoder_vals_size] )
 			#print "h_prev.shape ",h_prev.get_shape()
-			h_att = tf.expand_dims(tf.matmul(h_prev, watt), 1) #+ b	# (N,1,encoder_vals_size)
+
+			print "h_prev = ",h_prev
+			h_att = tf.expand_dims(tf.matmul(h_prev, watt), 1) #+ b	# (N,1,cell_size)
+			print "h_att = ",h_att
 			out_att = tf.reduce_sum( tf.multiply( h_att, encoder_vals ), axis=2 ) # (N, encoder_sequence_length)
+			print "out_att = ",out_att
 			alpha = tf.nn.softmax(out_att)  # (N, encoder_sequence_length)
-			context = tf.reduce_sum(encoder_vals * tf.expand_dims(alpha, 2), 1, name='context')   #(N, encoder_vals_size)
+			print "alpha = ",alpha
+			context = tf.reduce_sum(encoder_vals * tf.expand_dims(alpha, 2), 1, name='context')   #(N, lstm_cell_size)
+			print "cpontext at attention = ",context
 			return context, alpha
 
-	def getInitialState(self, encoder_outputs):
-		# encoder_outputs: length,N,dims
-		encoder_last_output = encoder_outputs[-1]   # N,dims
-		print encoder_last_output.shape
-		encoder_avg_output = tf.reduce_mean( encoder_outputs, axis=0) # N,dims
-		print "encoder_avg_output:: ",encoder_avg_output.shape
-		decoder_initial_state = [ encoder_avg_output, encoder_last_output ] # c,h
-		return decoder_initial_state
+	def getInitialState(self, encoder_outputs, lstm_cell_size, reuse=False):
+		with tf.variable_scope(tf.get_variable_scope(), reuse=reuse):
+			# encoder_outputs: length,N,dims
+			#encoder_last_output = encoder_outputs[-1]   # N,dims
+			#print encoder_last_output.shape
+			encoder_avg_output = tf.reduce_mean( encoder_outputs, axis=0) # N,dims
+			#print "encoder_avg_output:: ",encoder_avg_output.shape
+			winit = tf.get_variable('winit', [encoder_avg_output.shape[-1], lstm_cell_size] )
+			encoder_avg_output = tf.matmul( encoder_avg_output, winit )
+			decoder_initial_state = [ encoder_avg_output, encoder_avg_output ] # c,h
+			return decoder_initial_state
 
 	def runDecoderStep(self, lstm_cell, cur_inputs, prev_cell_output, state, encoder_outputs, reuse=False):
 		context, alpha = self.attentionLayer(encoder_outputs, prev_cell_output, reuse)
+		print "cur_inputs = ",cur_inputs
 		inputs = tf.concat([ cur_inputs, context ], axis=1)
+		print "inputs = ",inputs
+		print "conterxt = ",context
 		return lstm_cell(inputs, state=state), context, alpha
 
 
@@ -203,7 +263,7 @@ class RNNModel:
 		self.decoder_cell = cell = lstm_cell
 
 		# inital state
-		decoder_initial_state = self.getInitialState(encoder_outputs)
+		decoder_initial_state = self.getInitialState(encoder_outputs, lstm_cell_size, reuse=reuse)
 
 		#decoder output variable
 		self.initDecoderOutputVariables(lstm_cell_size,token_vocab_size)
@@ -222,6 +282,7 @@ class RNNModel:
 					if time_step > 0: tf.get_variable_scope().reuse_variables()
 					inputs_current_time_step = inputs[:, time_step, :]
 					#print "inputs_current_time_step.shape: ",inputs_current_time_step.shape
+					print "state = ",state
 					(cell_output, state), context, alpha = self.runDecoderStep(lstm_cell=lstm_cell, cur_inputs=inputs_current_time_step, encoder_outputs=encoder_outputs, prev_cell_output=cell_output, reuse=(time_step!=0), state=state)
 					#print(cell_output.shape)
 					outputs.append(cell_output)
@@ -252,25 +313,6 @@ class RNNModel:
 
 
 	#################################################################################################################
-
-	def __init__(self, buckets_dict, mode='training'):
-		print "========== INIT ============= "
-		if mode=='training':
-			self.token_lookup_sequences_decoder_placeholder_list = []
-			self.masker_list = []
-			self.token_output_sequences_decoder_placeholder_list = []
-			self.token_lookup_sequences_placeholder_list = []
-
-			for bucket_num, bucket in buckets_dict.items():
-				max_sentence_length = bucket['max_input_seq_length']
-				self.token_lookup_sequences_placeholder_list.append( tf.placeholder("int32", [None, max_sentence_length], name="token_lookup_sequences"+str(bucket_num))  )# token_lookup_sequences
-				
-				max_sentence_length = bucket['max_output_seq_length']
-				self.masker_list.append( tf.placeholder("float32", [None, max_sentence_length], name="masker"+str(bucket_num)) )
-				self.token_output_sequences_decoder_placeholder_list.append( tf.placeholder("int32", [None, max_sentence_length], name="token_output_sequences_decoder_placeholder"+str(bucket_num)) )
-				self.token_lookup_sequences_decoder_placeholder_list.append( tf.placeholder("int32", [None, max_sentence_length], name="token_lookup_sequences_decoder_placeholder"+str(bucket_num)) ) # token_lookup_sequences
-		print "========== INIT OVER ============= "
-
 
 
 	def getDecoderModel(self, config, encoder_outputs, is_training=False, mode='training', reuse=False, bucket_num=0 ):
@@ -348,67 +390,3 @@ class RNNModel:
 			return pred #[ tf.nn.softmax(vals) for vals in pred]
 
 	###################################################################################
-
-	#################################################################################################################
-	def getDecoderInferenceModel(self, config, encoder_outputs, is_training=False, mode='inference', reuse=False ):
-
-		token_vocab_size = config['vocab_size']
-		max_sentence_length = config['max_sentence_length']
-		embeddings_dim = config['embeddings_dim']
-		lstm_cell_size = config['lstm_cell_size']
-
-		#embeddings
-		share_embeddings=False
-		emb_scope = 'emb_decoder'
-		if share_embeddings:
-			emb_scope='emb'
-		if reuse:
-			token_emb_mat = self.decoder_token_emb_mat
-		else:
-			pretrained_embeddings = None
-			if config['pretrained_embeddings']:
-				pretrained_embeddings = config['decoder_embedding_matrix']
-			self.decoder_token_emb_mat = token_emb_mat = initEmbeddings(emb_scope, token_vocab_size, embeddings_dim, reuse=reuse, pretrained_embeddings=pretrained_embeddings)
-
-		with tf.variable_scope('decoder',reuse=reuse):
-				
-			# lstm 
-			lstm_cell = rnn.BasicLSTMCell(lstm_cell_size, forget_bias=1.0, state_is_tuple=True, reuse=reuse)
-
-			if mode=='inference':
-				params={k:v for k,v in config.items()}
-				params['lstm_cell'] = lstm_cell 
-				params['encoder_outputs'] = encoder_outputs
-				params['token_emb_mat'] = token_emb_mat
-				inp= None #tf.nn.embedding_lookup(token_emb_mat, token_lookup_sequences_decoder_placeholder)
-				pred = self.decoderRNN(inp, params, mode='inference')
-			else:
-				params={k:v for k,v in config.items()}
-				params['lstm_cell'] = lstm_cell 
-				params['encoder_outputs'] = encoder_outputs
-				#params['token_emb_mat'] = None
-				inp = tf.nn.embedding_lookup(token_emb_mat, token_lookup_sequences_decoder_placeholder) 
-				pred = self.decoderRNN(inp, params, mode='training')  # timesteps, N, vocab_size
-				pred_for_loss = pred # since sparse_softmax_cross_entropy_with_logits takes softmax on its own as well
-				pred = tf.unstack(pred)
-				pred = tf.stack( [ tf.nn.softmax(vals) for vals in pred ] )
-
-				if is_training:
-					pred_masked = pred_for_loss 
-					#tf.multiply( tf.expand_dims(tf.transpose(masker),2), pred)  # after transpose and expand, masker becomes (4,20,1) : timesteps,N,1. so pred_masked is timesteps,N,vocab_size
-					
-					print "pred_masked .shape : ",pred_masked.shape
-					pred_masked = tf.transpose( pred_masked , [1,0,2] ) # N, timesteps, vocabsize
-					cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=pred_masked, labels=token_output_sequences_placeholder) # token_output_sequences_placeholder is N,timesteps. cost will be N, timesteps
-					cost = tf.multiply(cost, masker)  # both masker and cost is N,timesteps. 
-
-					#masker = tf.reshape(masks, (-1))
-					#cost = losses * masks
-					print "cost.shape: " ,cost.shape
-					cost = tf.reduce_sum(cost) # N
-					masker_sum = tf.reduce_sum(masker) # N
-					cost = tf.divide(cost, masker_sum) # N
-					self.cost = cost
-
-			return pred #[ tf.nn.softmax(vals) for vals in pred]
-
