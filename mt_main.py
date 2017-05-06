@@ -116,9 +116,10 @@ class PreProcessing:
 		
 		#spplit indices
 		nb_validation_samples = int(config.VALIDATION_SPLIT * encoder_inputs.shape[0])
+		print "nb_validation_samples = ",nb_validation_samples
 		nb_test_samples = int(config.TEST_SPLIT * encoder_inputs.shape[0])
 		test_indices = indices[-nb_test_samples:]
-		val_indices = indices[-nb_test_samples-nb_validation_samples:nb_test_samples]
+		val_indices = indices[-nb_test_samples-nb_validation_samples:-nb_test_samples]
 		train_indices = indices[0:-nb_test_samples-nb_validation_samples]
 		print "nb_test_samples=",nb_test_samples
 
@@ -130,7 +131,7 @@ class PreProcessing:
 
 		print "========================="
 		print "traindata  lengths"
-		for dat in train:
+		for dat in val:
 			print len(dat)
 		print "========================="
 
@@ -215,8 +216,7 @@ def main():
 		params['encoder_embeddings_matrix'] = encoder_embedding_matrix 
 		params['decoder_embeddings_matrix'] = decoder_embedding_matrix 
 
-
-
+	'''
 	train_buckets = {}
 	for bucket,_ in enumerate(buckets):
 		train_buckets[bucket] = train
@@ -224,14 +224,19 @@ def main():
 	rnn_model = solver.Solver(buckets)
 	_ = rnn_model.getModel(params, mode='train',reuse=False, buckets=buckets)
 	rnn_model.trainModel(config=params, train_feed_dict=train_buckets, val_feed_dct=None, reverse_vocab=preprocessing.index_word, do_init=True)
+	'''
 
-	if len(train_decoder_outputs.shape)==3:
-		train_decoder_outputs=np.reshape(train_decoder_outputs, (train_decoder_outputs.shape[0], train_decoder_outputs.shape[1]))
+	val_encoder_inputs, val_decoder_inputs, val_decoder_outputs = val
+	print "val_encoder_inputs = ",val_encoder_inputs
 
-	#rnn_model = solver.Solver(buckets=None, mode='inference')
-	#_ = rnn_model.getModel(params, mode='inference', reuse=False, buckets=None)
-	#print "----Running inference-----"
-	#rnn_model.runInference(params, train_encoder_inputs[:params['batch_size']], train_decoder_outputs[:params['batch_size']], preprocessing.index_word)
+	if len(val_decoder_outputs.shape)==3:
+		val_decoder_outputs=np.reshape(val_decoder_outputs, (val_decoder_outputs.shape[0], val_decoder_outputs.shape[1]))
+
+	rnn_model = solver.Solver(buckets=None, mode='inference')
+	_ = rnn_model.getModel(params, mode='inference', reuse=False, buckets=None)
+	print "----Running inference-----"
+	#rnn_model.runInference(params, val_encoder_inputs[:params['batch_size']], val_decoder_outputs[:params['batch_size']], preprocessing.index_word)
+	rnn_model.solveAll(params, val_encoder_inputs, val_decoder_outputs, preprocessing.index_word)
 
 if __name__ == "__main__":
 	main()

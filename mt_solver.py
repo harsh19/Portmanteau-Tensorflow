@@ -12,6 +12,7 @@ import tensorflow as tf
 from tensorflow.contrib import rnn
 from utilities import OutputSentence, TopN
 import utilities
+import utilities as utils
 import mt_model as model
 	
 class Solver:
@@ -59,7 +60,7 @@ class Solver:
 			self.token_output_sequences_decoder_placeholder_list = self.model_obj.token_output_sequences_decoder_placeholder_list
 			self.mask_list = self.model_obj.masker_list
 		else:
-			config['batch_size'] = 5
+			#config['batch_size'] = 5
 			encoder_outputs = self.model_obj.getEncoderModel(config, mode='inference', reuse=reuse)
 			#print "encoder_outputs.shaoe :::: ",len(encoder_outputs),encoder_outputs[0].shape
 			self.decoder_outputs_inference, self.encoder_outputs = self.model_obj.getDecoderModel(config, encoder_outputs, is_training=False, 	mode='inference', reuse=False)	
@@ -110,10 +111,10 @@ class Solver:
 
 			sess = self.sess
 
-			training_iters=1000
-			display_step=50
+			training_iters=500
+			display_step=20
 			sample_step=50
-			save_step = 50
+			save_step = 100
 			n = feed_dct[token_lookup_sequences_placeholder].shape[0]
 			# Launch the graph
 			step = 1
@@ -160,12 +161,12 @@ class Solver:
 
 	###################################################################################
 
-	def runInference(self, config, encoder_inputs, decoder_ground_truth_outputs, reverse_vocab, sess=None): # sampling
+	def runInference(self, config, encoder_inputs, decoder_ground_truth_outputs, reverse_vocab, sess=None, print_all=True): # sampling
 		print " INFERENCE STEP ...... ============================================================"
 		if sess==None:
 	  		sess = tf.Session()
 	  		saver = tf.train.Saver()
-	  		saver.restore(sess, "./tmp/model.ckpt")
+	  		saver.restore(sess, "./tmp/model200.ckpt")
 		#return utilities.runInference(config, x_test, reverse_vocab, sess, solver_obj =self)
 		typ = "greedy" #config['inference_type']
 		model_obj = self.model_obj
@@ -183,17 +184,49 @@ class Solver:
 			'''
 			decoder_outputs_inference = np.transpose(decoder_outputs_inference) # (N,timesteps)
 			#print "decoder_outputs_inference.shape : ",decoder_outputs_inference.shape
-			for i,row in enumerate(decoder_outputs_inference):
-				ret=""
-				for val in row:
-					ret+=( " " + reverse_vocab[val] )
-				#print "decoder_ground_truth_outputs[i] = ",decoder_ground_truth_outputs[i]
-				print "GT: ", [ reverse_vocab[j] for j in decoder_ground_truth_outputs[i]]
-				print "prediction: ",ret
-				print "row= ",row
-				print "matches: ", [ r==x for r,x in zip(row,decoder_ground_truth_outputs[i]) ]
-				print ""
-				if i>20:
-					break
+			if print_all:
+				for i,row in enumerate(decoder_outputs_inference):
+					ret=""
+					for val in row:
+						ret+=( " " + reverse_vocab[val] )
+					#print "decoder_ground_truth_outputs[i] = ",decoder_ground_truth_outputs[i]
+					print "GT: ", [ reverse_vocab[j] for j in decoder_ground_truth_outputs[i]]
+					print "prediction: ",ret
+					print "row= ",row
+					print "matches: ", [ r==x for r,x in zip(row,decoder_ground_truth_outputs[i]) ]
+					print ""
+					if i>20:
+						break
+			return decoder_outputs_inference
+
+
+	###################################################################################
+
+	def solveAll(self, config, encoder_inputs, decoder_ground_truth_outputs, reverse_vocab, sess=None): # sampling
+		print " SolveAll ...... ============================================================"
+		batch_size = config['batch_size']
+		num_batches = ( len(encoder_inputs) + batch_size - 1)/ batch_size 
+		print "num_batches = ",num_batches
+		print "batch_size = ",batch_size
+		print "len(encoder_inputs) = ",len(encoder_inputs)
+		decoder_outputs_inference = []
+		for i in range(num_batches):
+			print "i= ",i
+			encoder_inputs_cur = encoder_inputs[i*batch_size:(i+1)*batch_size]
+			decoder_gt_outputs_cur = decoder_ground_truth_outputs[i*batch_size:(i+1)*batch_size]
+			lim = len(encoder_inputs_cur)
+			if len(encoder_inputs_cur)<batch_size:
+				gap = batch_size - len(encoder_inputs_cur)
+				for j in range(gap):
+					encoder_inputs_cur = np.vstack( (encoder_inputs_cur,encoder_inputs[0]) )
+					decoder_gt_outputs_cur = np.vstack( (decoder_gt_outputs_cur,decoder_ground_truth_outputs[0]) )
+					#decoder_gt_outputs_cur.extend(decoder_ground_truth_outputs[0]*gap)
+			decoder_outputs_inference_cur = self.runInference(config, encoder_inputs_cur, decoder_gt_outputs_cur, reverse_vocab, sess=None, print_all=False)
+			decoder_outputs_inference.extend( decoder_outputs_inference_cur[:lim] )
+		print len(encoder_inputs)
+		print len(decoder_outputs_inference)
+		print decoder_outputs_inference[0], decoder_ground_truth_outputs[0]
+		print utils.getScores(decoder_outputs_inference, decoder_ground_truth_outputs)
+
 
 ########################################################################################
