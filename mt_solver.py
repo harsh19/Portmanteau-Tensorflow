@@ -114,7 +114,7 @@ class Solver:
 			training_iters=50
 			display_step=2
 			sample_step=5
-			save_step = 10
+			save_step = 39
 			n = feed_dct[token_lookup_sequences_placeholder].shape[0]
 			# Launch the graph
 			step = 1
@@ -166,24 +166,15 @@ class Solver:
 		if sess==None:
 	  		sess = tf.Session()
 	  		saver = tf.train.Saver()
-	  		saver.restore(sess, "./tmp/model200.ckpt")
-		#return utilities.runInference(config, x_test, reverse_vocab, sess, solver_obj =self)
+	  		saver.restore(sess, "./tmp/model39.ckpt")
 		typ = "greedy" #config['inference_type']
 		model_obj = self.model_obj
-		#feed_dct={model_obj.token_lookup_sequences_placeholder:x_test}
 		feed_dct={model_obj.token_lookup_sequences_placeholder_inference:encoder_inputs}
 		batch_size = config['batch_size'] #x_test.shape[0]
 		if typ=="greedy":
 			decoder_outputs_inference, encoder_outputs = np.array( sess.run([self.decoder_outputs_inference, self.encoder_outputs], feed_dict= feed_dct) ) # timesteps, N
 			encoder_outputs = np.array(encoder_outputs)
-			'''print("----->>>>>>>>")
-			print(encoder_outputs.shape)
-			print(encoder_outputs[0][1][:15]) # 1st data point, 2nd word
-			print(encoder_outputs[1][1][:15]) # 2nd data point, 2nd word
-			print("----->>>>>>>>")
-			'''
 			decoder_outputs_inference = np.transpose(decoder_outputs_inference) # (N,timesteps)
-			#print "decoder_outputs_inference.shape : ",decoder_outputs_inference.shape
 			if print_all:
 				for i,row in enumerate(decoder_outputs_inference):
 					ret=""

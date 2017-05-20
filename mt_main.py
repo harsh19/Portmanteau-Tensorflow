@@ -34,13 +34,6 @@ class PreProcessing:
 			ret.append(sequence)
 		return np.array(ret)
 
-	def padAsPerBuckets(self, sequences_input, sequences_output):
-		buckets = {}
-		num_buckets = 4
-		all_inp_lengths = 0
-
-
-
 	def loadPortmanteauData(self, src):
 		data = open(src,"r").readlines()
 		inputs, outputs = [],[]
@@ -150,24 +143,6 @@ def getPretrainedEmbeddings(src):
 	ret['sentstart'] = ret['SENT_START']
 	ret['sentend'] = ret['SENT_END']
 	return ret
-	
-def saveEmbeddings(model, vocab, embeddings_out_name = "output_embeddings.txt"):
-	layer = model.layers[1]
-	print type(layer)
-	wt = layer.get_weights()
-	print type(wt)
-	print len(wt)
-	print type(wt[0])
-	embeddings = wt[0]
-	print embeddings.shape
-	fw = open(embeddings_out_name, "w")
-	for word,idx in vocab.items():
-		fw.write(word + "\t")
-		for val in embeddings[idx]:
-			fw.write( str(val) + "\t")
-		fw.write("\n")
-	fw.close()
-	print "Saved embeddings to ",embeddings_out_name
 
 
 def main():
@@ -216,7 +191,7 @@ def main():
 		params['encoder_embeddings_matrix'] = encoder_embedding_matrix 
 		params['decoder_embeddings_matrix'] = decoder_embedding_matrix 
 
-	mode='train'
+	mode=''
 	if mode=='train':
 		train_buckets = {}
 		for bucket,_ in enumerate(buckets):

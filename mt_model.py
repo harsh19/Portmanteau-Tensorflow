@@ -19,7 +19,7 @@ class RNNModel:
 
 	def __init__(self, buckets_dict, mode='training'):
 		print "========== INIT ============= "
-		self.use_reverse_encoder = True
+		self.use_reverse_encoder = False
 		if mode=='training':
 			self.token_lookup_sequences_decoder_placeholder_list = []
 			self.masker_list = []
@@ -166,7 +166,7 @@ class RNNModel:
 			return decoder_initial_state
 
 	def runDecoderStep(self, lstm_cell, cur_inputs, prev_cell_output, state, encoder_outputs, reuse=False):
-		context, alpha = self.attentionLayer(encoder_outputs, prev_cell_output, reuse)
+		context, alpha = self.    (encoder_outputs, prev_cell_output, reuse)
 		print "cur_inputs = ",cur_inputs
 		inputs = tf.concat([ cur_inputs, context ], axis=1)
 		print "inputs = ",inputs
