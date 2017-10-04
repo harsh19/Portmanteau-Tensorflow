@@ -191,7 +191,7 @@ def main():
 		params['encoder_embeddings_matrix'] = encoder_embedding_matrix 
 		params['decoder_embeddings_matrix'] = decoder_embedding_matrix 
 
-	mode=''
+	mode='train'
 	if mode=='train':
 		train_buckets = {}
 		for bucket,_ in enumerate(buckets):
